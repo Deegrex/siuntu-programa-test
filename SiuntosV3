@@ -1,0 +1,81 @@
+# Naudojamas nemokamas API raktas
+# https://openrouteservice.org
+# Atvaizduoja marsruta interaktyviame zemelapyje
+
+import folium
+import openrouteservice as ors
+from geopy.geocoders import Nominatim
+
+client = ors.Client(key='5b3ce3597851110001cf6248a9c9aae412dd41a8b6203748b9fa9be1')
+geolocator = Nominatim(user_agent="my_geocoder")
+
+# Funkcija adreso ir svorio gavimui
+def get_address_and_weight():
+    address = input("Įveskite adresą: ")
+    weight = float(input("Įveskite siuntos svorį (kg): "))
+    return address, weight
+
+# Pradinio taško koordinatės
+vehicle_start = [21.18687, 55.68439]
+
+# Sukuriamas folium žemėlapis
+m = folium.Map(location=list(reversed(vehicle_start)), tiles="cartodbpositron", zoom_start=14)
+
+# Pridedame pradinį tašką
+folium.Marker(location=list(reversed(vehicle_start)), icon=folium.Icon(color="red")).add_to(m)
+
+# Gauname norimų adresų skaičių
+num_addresses = int(input("Įveskite norimų adresų skaičių: "))
+
+# Gauname vartotojo įvestus adresus ir svorius
+addresses = []
+weights = []
+for _ in range(num_addresses):
+    address, weight = get_address_and_weight()
+    addresses.append(address)
+    weights.append(weight)
+    # Pridedame žymeklį su adreso koordinatėmis į žemėlapį
+    location = geolocator.geocode(address)
+    folium.Marker(location=[location.latitude, location.longitude], popup=address).add_to(m)
+
+# Konvertuojame adresus į koordinates
+job_locations = [geolocator.geocode(address) for address in addresses]
+
+# Sukuriamas darbas iš adresų
+jobs = [ors.optimization.Job(id=index, location=[location.longitude, location.latitude], amount=[1]) for index, location in enumerate(job_locations)]
+
+# Sukuriamas transporto priemonių sąrašas
+vehicles = [
+    ors.optimization.Vehicle(id=0, profile='driving-car', start=vehicle_start, end=vehicle_start, capacity=[num_addresses]),
+]   
+
+# Optimizuojami maršrutai
+optimized = client.optimization(jobs=jobs, vehicles=vehicles, geometry=True)
+line_colors = ['green']
+
+# Saugosime visų maršrutų ilgį
+total_distance = 0  
+
+# Pridedami maršrutai į žemėlapį
+for route in optimized['routes']:
+    route_coords = ors.convert.decode_polyline(route['geometry'])['coordinates']
+    route_distance = route['distance']
+    total_distance += route_distance
+    folium.PolyLine(locations=[list(reversed(coords)) for coords in route_coords], color=line_colors[route['vehicle']]).add_to(m)
+    #print(f"Maršrutas {route['vehicle'] + 1}: {route_distance / 2000:.2f} km")
+
+print(f"Bendras viso maršruto ilgis: {total_distance / 1000:.2f} km")
+
+# Apskaičiuojame bendrą siuntos svorį
+total_weight = sum(weights)
+print(f"Bendras siuntų svoris : {int(total_weight)} ")
+
+# Apskaičiuojame kiek masinų reikės
+vehicle_capacity = 100
+vehicles_needed = (total_weight / vehicle_capacity) + 1
+print(f"Reikės {int(vehicles_needed)} transporto priemonių siuntai nuvežti.")
+
+# Išsaugojamas žemėlapis
+m.save("20240511v4a.html")
+
+print("Interaktyvus žemėlapis su optimaliais maršrutais sukurtas kaip optimized_route_map.html failas.")
